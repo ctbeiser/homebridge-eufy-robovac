@@ -1,7 +1,7 @@
 import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
 
 import { EufyRobovacPlatform } from './platform';
-import { ErrorCode, RoboVac, StatusDps, StatusResponse, WorkStatus, getErrorCodeFriendlyName, statusDpsFriendlyNames } from './robovac-api';
+import { ErrorCode, RoboVac, StatusDps, StatusResponse, WorkStatus, getErrorCodeFriendlyName, statusDpsFriendlyNames, isError } from './robovac-api';
 import { Logger } from './consoleLogger';
 
 export class EufyRobovacAccessory {
@@ -91,7 +91,17 @@ export class EufyRobovacAccessory {
 
     this.roboVac = new RoboVac(this.connectionConfig, this.updateCharacteristics.bind(this), this.cachingDuration, this.log);
 
+    // Prime cache immediately after initialization to avoid defaults on first reads
+    this.requestStatusRefreshInBackground();
+
     this.log.info('Finished initializing accessory:', this.name);
+  }
+
+  private requestStatusRefreshInBackground() {
+    // Fire-and-forget refresh; underlying API dedupes concurrent calls
+    // and respects caching to avoid unnecessary device hits.
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this.roboVac.getStatusFromDeviceSynchronized().catch(() => { /* ignore */ });
   }
 
   /**
@@ -101,94 +111,73 @@ export class EufyRobovacAccessory {
   async getRunning(): Promise<CharacteristicValue> {
     this.log.debug(`getRunning for ${this.name}`);
 
-    try {
-      return await Promise.race([
-        this.roboVac.getRunning(),
-        new Promise<boolean>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const cached = this.roboVac.getRunningCached();
+    if (cached != null) {
+      this.requestStatusRefreshInBackground();
+      return cached;
     }
+    this.requestStatusRefreshInBackground();
+    return false;
   }
 
   async getFindRobot(): Promise<CharacteristicValue> {
     this.log.debug(`getFindRobot for ${this.name}`);
 
-    try {
-      return await Promise.race([
-        this.roboVac.getFindRobot(),
-        new Promise<boolean>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const cached = this.roboVac.getFindRobotCached();
+    if (cached != null) {
+      this.requestStatusRefreshInBackground();
+      return cached;
     }
+    this.requestStatusRefreshInBackground();
+    return false;
   }
 
   async getLowBattery(): Promise<CharacteristicValue> {
     this.log.debug(`getLowBattery for ${this.name}`);
 
-    try {
-      const battery_level = await Promise.race([
-        this.roboVac.getBatteryLevel(),
-        new Promise<number>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-      return battery_level <= this.lowBatteryThreshold;
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const batteryLevel = this.roboVac.getBatteryLevelCached();
+    if (batteryLevel != null && batteryLevel >= 0) {
+      this.requestStatusRefreshInBackground();
+      return batteryLevel <= this.lowBatteryThreshold;
     }
+    this.requestStatusRefreshInBackground();
+    return false;
   }
 
   async getBatteryLevel(): Promise<CharacteristicValue> {
     this.log.debug(`getBatteryLevel for ${this.name}`);
 
-    try {
-      return await Promise.race([
-        this.roboVac.getBatteryLevel(),
-        new Promise<number>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const batteryLevel = this.roboVac.getBatteryLevelCached();
+    if (batteryLevel != null && batteryLevel >= 0) {
+      this.requestStatusRefreshInBackground();
+      return batteryLevel;
     }
+    this.requestStatusRefreshInBackground();
+    return 0;
   }
 
   async getCharging(): Promise<CharacteristicValue> {
     this.log.debug(`getCharging for ${this.name}`);
 
-    try {
-      const work_status = await Promise.race([
-        this.roboVac.getWorkStatus(),
-        new Promise<WorkStatus>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-      return this.workStatusToChargingState(work_status);
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const workStatus = this.roboVac.getWorkStatusCached();
+    if (workStatus != null) {
+      this.requestStatusRefreshInBackground();
+      return this.workStatusToChargingState(workStatus);
     }
+    this.requestStatusRefreshInBackground();
+    return this.platform.Characteristic.ChargingState.NOT_CHARGING;
   }
 
   async getErrorStatus(): Promise<CharacteristicValue> {
     this.log.debug(`getErrorStatus for ${this.name}`);
 
-    try {
-      const error_code = await Promise.race([
-        this.roboVac.getErrorCode(),
-        new Promise<string>((resolve, reject) => {
-          setTimeout(() => reject(new Error("Request timed out")), this.callbackTimeout);
-        })
-      ]);
-      return error_code !== ErrorCode.NO_ERROR;
-    } catch {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    const errorCode = this.roboVac.getErrorCodeCached();
+    if (errorCode != null) {
+      this.requestStatusRefreshInBackground();
+      return isError(errorCode) === true;
     }
+    this.requestStatusRefreshInBackground();
+    return false;
   }
 
   /**
@@ -265,10 +254,10 @@ export class EufyRobovacAccessory {
       }
     }
     if (this.errorSensorService && statusResponse.dps[StatusDps.ERROR_CODE] !== undefined) {
-      const is_error = (statusResponse.dps[StatusDps.ERROR_CODE] !== ErrorCode.NO_ERROR);
-      this.log.debug(`updating Error Sensor status for ${this.name} to ${is_error}`);
-      this.errorSensorService.updateCharacteristic(this.platform.Characteristic.MotionDetected, is_error);
-      if (is_error) this.log.info(`${this.name} reported a device error: ${getErrorCodeFriendlyName(statusResponse.dps[StatusDps.ERROR_CODE])}`);
+      const hasError = isError(statusResponse.dps[StatusDps.ERROR_CODE]);
+      this.log.debug(`updating Error Sensor status for ${this.name} to ${hasError}`);
+      this.errorSensorService.updateCharacteristic(this.platform.Characteristic.MotionDetected, hasError);
+      if (hasError) this.log.info(`${this.name} reported a device error: ${getErrorCodeFriendlyName(statusResponse.dps[StatusDps.ERROR_CODE])}`);
       counter++;
     }
     this.log.debug(`updateCharacteristics for ${this.name} complete - updated ${counter} characteristics.`)

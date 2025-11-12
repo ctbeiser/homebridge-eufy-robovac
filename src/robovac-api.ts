@@ -127,8 +127,39 @@ export const errorCodeFriendlyNames = new Map<string, string>([
 ]
 );
 
-export function getErrorCodeFriendlyName(errorCode: string) {
-    return errorCodeFriendlyNames.get(errorCode) ?? errorCode;
+/**
+ * Normalize various device-specific error code representations to a canonical string enum.
+ * Some models report "no error" as "0" (or 0) instead of "no_error".
+ */
+export function normalizeErrorCode(errorCode: unknown): string {
+    if (errorCode === null || errorCode === undefined) {
+        return ErrorCode.NO_ERROR;
+    }
+    // Handle numeric and string "0" as NO_ERROR
+    if (errorCode === 0 || errorCode === "0") {
+        return ErrorCode.NO_ERROR;
+    }
+    if (typeof errorCode === "string") {
+        // Normalize common variants by trimming and preserving device-provided casing where possible
+        const trimmed = errorCode.trim();
+        // Some devices might send "no_error" (expected), "no error", "None", etc.
+        const lowered = trimmed.toLowerCase();
+        if (lowered === "no_error" || lowered === "no error" || lowered === "none") {
+            return ErrorCode.NO_ERROR;
+        }
+        return trimmed;
+    }
+    // Fallback to string representation
+    return String(errorCode);
+}
+
+export function isError(errorCode: unknown): boolean {
+    return normalizeErrorCode(errorCode) !== ErrorCode.NO_ERROR;
+}
+
+export function getErrorCodeFriendlyName(errorCode: unknown) {
+    const normalized = normalizeErrorCode(errorCode);
+    return errorCodeFriendlyNames.get(normalized) ?? normalized;
 }
 
 export class RoboVac {
