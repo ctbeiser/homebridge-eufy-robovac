@@ -15,6 +15,21 @@ export enum StatusDps {
     ERROR_CODE = '106'
 }
 
+// Strong typing for all DPS values returned by the device
+export type Dps = {
+    [StatusDps.DEFAULT]: boolean,
+    [StatusDps.RUNNING]: boolean,
+    [StatusDps.DIRECTION]: Direction,
+    [StatusDps.WORK_MODE]: WorkMode,
+    [StatusDps.WORK_STATUS]: WorkStatus,
+    [StatusDps.GO_HOME]: boolean,
+    [StatusDps.CLEAN_SPEED]: CleanSpeed,
+    [StatusDps.FIND_ROBOT]: boolean,
+    [StatusDps.BATTERY_LEVEL]: number,
+    // Keep string here because device may report non-enum values occasionally
+    [StatusDps.ERROR_CODE]: string,
+}
+
 export const statusDpsFriendlyNames = new Map<string, string>([
     [StatusDps.DEFAULT, "Default Property (ignore)"],
     [StatusDps.RUNNING, "Running"],
@@ -31,34 +46,12 @@ export const statusDpsFriendlyNames = new Map<string, string>([
 
 export interface StatusResponse {
     devId: string,
-    dps: {
-        [StatusDps.DEFAULT]?: boolean,
-        [StatusDps.RUNNING]?: boolean,
-        [StatusDps.DIRECTION]?: string,
-        [StatusDps.WORK_MODE]?: string,
-        [StatusDps.WORK_STATUS]?: string,
-        [StatusDps.GO_HOME]?: boolean,
-        [StatusDps.CLEAN_SPEED]?: string,
-        [StatusDps.FIND_ROBOT]?: boolean,
-        [StatusDps.BATTERY_LEVEL]?: number,
-        [StatusDps.ERROR_CODE]?: string,
-    }
+    dps: Partial<Dps>
 }
 
 export interface RobovacStatus {
     devId: string,
-    dps: {
-        [StatusDps.DEFAULT]: boolean,
-        [StatusDps.RUNNING]: boolean,
-        [StatusDps.DIRECTION]: string,
-        [StatusDps.WORK_MODE]: string,
-        [StatusDps.WORK_STATUS]: string,
-        [StatusDps.GO_HOME]: boolean,
-        [StatusDps.CLEAN_SPEED]: string,
-        [StatusDps.FIND_ROBOT]: boolean,
-        [StatusDps.BATTERY_LEVEL]: number,
-        [StatusDps.ERROR_CODE]: string,
-    }
+    dps: Dps
 }
 
 export function formatStatusResponse(statusResponse: StatusResponse): string {
@@ -194,7 +187,7 @@ export class RoboVac {
             }
 
             if (data.dps) {
-                Object.assign(this.lastStatus.dps, data.dps);
+                Object.assign(this.lastStatus.dps, data.dps as Partial<Dps>);
                 this.lastStatusUpdate = new Date();
                 dataReceivedCallback(data);
             }
@@ -212,7 +205,7 @@ export class RoboVac {
             }
 
             if (data.dps) {
-                Object.assign(this.lastStatus.dps, data.dps);
+                Object.assign(this.lastStatus.dps, data.dps as Partial<Dps>);
                 this.lastStatusUpdate = new Date();
                 this.lastStatusValid = true;
                 dataReceivedCallback(data);
@@ -242,6 +235,21 @@ export class RoboVac {
         this.connect().catch((e) => {
             this.log.error("Error during initial connect:", e);
         });
+    }
+
+    private mergeDps(previous: Dps, incoming?: Partial<Dps>): Dps {
+        return {
+            [StatusDps.DEFAULT]: incoming?.[StatusDps.DEFAULT] ?? previous[StatusDps.DEFAULT],
+            [StatusDps.RUNNING]: incoming?.[StatusDps.RUNNING] ?? previous[StatusDps.RUNNING],
+            [StatusDps.DIRECTION]: incoming?.[StatusDps.DIRECTION] ?? previous[StatusDps.DIRECTION],
+            [StatusDps.WORK_MODE]: incoming?.[StatusDps.WORK_MODE] ?? previous[StatusDps.WORK_MODE],
+            [StatusDps.WORK_STATUS]: incoming?.[StatusDps.WORK_STATUS] ?? previous[StatusDps.WORK_STATUS],
+            [StatusDps.GO_HOME]: incoming?.[StatusDps.GO_HOME] ?? previous[StatusDps.GO_HOME],
+            [StatusDps.CLEAN_SPEED]: incoming?.[StatusDps.CLEAN_SPEED] ?? previous[StatusDps.CLEAN_SPEED],
+            [StatusDps.FIND_ROBOT]: incoming?.[StatusDps.FIND_ROBOT] ?? previous[StatusDps.FIND_ROBOT],
+            [StatusDps.BATTERY_LEVEL]: incoming?.[StatusDps.BATTERY_LEVEL] ?? previous[StatusDps.BATTERY_LEVEL],
+            [StatusDps.ERROR_CODE]: incoming?.[StatusDps.ERROR_CODE] ?? previous[StatusDps.ERROR_CODE],
+        }
     }
 
     async connect(): Promise<void> {
@@ -293,7 +301,12 @@ export class RoboVac {
             }
 
             const schema = await this.api.get({ schema: true });
-            this.lastStatus = schema as RobovacStatus;
+            // Merge the incoming partial DPS into the existing defaults to avoid undefined values
+            const incoming = schema as StatusResponse;
+            this.lastStatus = {
+                devId: incoming.devId ?? this.lastStatus.devId,
+                dps: this.mergeDps(this.lastStatus.dps, incoming.dps)
+            };
             this.lastStatusUpdate = new Date();
             this.lastStatusValid = true;
             this.ongoingStatusUpdate = null;
@@ -330,47 +343,47 @@ export class RoboVac {
 
     async getRunning(): Promise<boolean> {
         const robovacStatus = await this.getStatus();
-        return <boolean>robovacStatus.dps[StatusDps.RUNNING];
+        return robovacStatus.dps[StatusDps.RUNNING];
     }
 
     async getDirection(): Promise<Direction> {
         const robovacStatus = await this.getStatus();
-        return <Direction>robovacStatus.dps[StatusDps.DIRECTION];
+        return robovacStatus.dps[StatusDps.DIRECTION];
     }
 
     async getWorkMode(): Promise<WorkMode> {
         const robovacStatus = await this.getStatus();
-        return <WorkMode>robovacStatus.dps[StatusDps.WORK_MODE];
+        return robovacStatus.dps[StatusDps.WORK_MODE];
     }
 
     async getWorkStatus(): Promise<WorkStatus> {
         const robovacStatus = await this.getStatus();
-        return <WorkStatus>robovacStatus.dps[StatusDps.WORK_STATUS];
+        return robovacStatus.dps[StatusDps.WORK_STATUS];
     }
 
     async getGoHome(): Promise<boolean> {
         const robovacStatus = await this.getStatus();
-        return <boolean>robovacStatus.dps[StatusDps.GO_HOME];
+        return robovacStatus.dps[StatusDps.GO_HOME];
     }
 
     async getCleanSpeed(): Promise<CleanSpeed> {
         const robovacStatus = await this.getStatus();
-        return <CleanSpeed>robovacStatus.dps[StatusDps.CLEAN_SPEED];
+        return robovacStatus.dps[StatusDps.CLEAN_SPEED];
     }
 
     async getFindRobot(): Promise<boolean> {
         const robovacStatus = await this.getStatus();
-        return <boolean>robovacStatus.dps[StatusDps.FIND_ROBOT];
+        return robovacStatus.dps[StatusDps.FIND_ROBOT];
     }
 
     async getBatteryLevel(): Promise<number> {
         const robovacStatus = await this.getStatus();
-        return <number>robovacStatus.dps[StatusDps.BATTERY_LEVEL];
+        return robovacStatus.dps[StatusDps.BATTERY_LEVEL];
     }
 
     async getErrorCode(): Promise<string> {
         const robovacStatus = await this.getStatus();
-        return <string>robovacStatus.dps[StatusDps.ERROR_CODE];
+        return robovacStatus.dps[StatusDps.ERROR_CODE];
     }
 
     getRunningCached(): boolean | null {
@@ -378,15 +391,15 @@ export class RoboVac {
     }
 
     getDirectionCached(): Direction | null {
-        return this.lastStatusValid ? <Direction>this.lastStatus.dps[StatusDps.DIRECTION] : null;
+        return this.lastStatusValid ? this.lastStatus.dps[StatusDps.DIRECTION] : null;
     }
 
     getWorkModeCached(): WorkMode | null {
-        return this.lastStatusValid ? <WorkMode>this.lastStatus.dps[StatusDps.WORK_MODE] : null;
+        return this.lastStatusValid ? this.lastStatus.dps[StatusDps.WORK_MODE] : null;
     }
 
     getWorkStatusCached(): WorkStatus | null {
-        return this.lastStatusValid ? <WorkStatus>this.lastStatus.dps[StatusDps.WORK_STATUS] : null;
+        return this.lastStatusValid ? this.lastStatus.dps[StatusDps.WORK_STATUS] : null;
     }
 
     getGoHomeCached(): boolean | null {
@@ -394,7 +407,7 @@ export class RoboVac {
     }
 
     getCleanSpeedCached(): CleanSpeed | null {
-        return this.lastStatusValid ? <CleanSpeed>this.lastStatus.dps[StatusDps.CLEAN_SPEED] : null;
+        return this.lastStatusValid ? this.lastStatus.dps[StatusDps.CLEAN_SPEED] : null;
     }
 
     getFindRobotCached(): boolean | null {
